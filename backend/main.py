@@ -213,7 +213,7 @@ async def models(request: Request):
     return JSONResponse(status_code=r.status_code, content=r.json())
 
 
-@app.post("/v1/chat/completions")
+@app.post("/chat/completions")
 async def chat_completions(request: Request):
     current_user(request)
     body = await request.json()
