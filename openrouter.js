@@ -8,6 +8,31 @@
 //   apiKey   — cheia OpenRouter (doar în modul direct)
 
 const DIRECT_BASE = 'https://openrouter.ai/api/v1';
+const TOKEN_KEY = 'ors.sessionToken';
+
+// token-ul de sesiune (autentificare prin header, nu doar cookie —
+// funcționează și în Safari, care blochează cookie-urile cross-site)
+export function getSessionToken() {
+  try {
+    return localStorage.getItem(TOKEN_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+export function setSessionToken(token) {
+  try {
+    localStorage.setItem(TOKEN_KEY, token);
+  } catch {
+    /* ignore */
+  }
+}
+export function clearSessionToken() {
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    /* ignore */
+  }
+}
 
 export function resolveBase(settings = {}) {
   return settings.baseUrl?.trim() ? settings.baseUrl.replace(/\/$/, '') : DIRECT_BASE;
@@ -20,6 +45,7 @@ export function isBackendMode(settings = {}) {
 function headersFor(settings, { withKey }) {
   const h = { 'Content-Type': 'application/json' };
   if (withKey && settings.apiKey) h.Authorization = `Bearer ${settings.apiKey}`;
+  if (isBackendMode(settings) && getSessionToken()) h.Authorization = `Bearer ${getSessionToken()}`;
   return h;
 }
 
@@ -139,10 +165,12 @@ export async function streamChat({
 // ---------- helpers pentru auth (doar modul backend) ----------
 
 export async function apiAuth(baseUrl, path, options = {}) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (getSessionToken()) headers.Authorization = `Bearer ${getSessionToken()}`;
   const res = await fetch(`${baseUrl.replace(/\/$/, '')}${path}`, {
     ...options,
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    headers: { ...headers, ...(options.headers || {}) },
   });
   let data = null;
   try {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { listModels, apiAuth } from '../lib/openrouter.js';
+import { listModels, apiAuth, setSessionToken, clearSessionToken } from '../lib/openrouter.js';
 
 export default function SettingsPanel({
   apiKey, setApiKey,
@@ -47,6 +47,7 @@ export default function SettingsPanel({
     });
     setBusy(false);
     if (r.ok) {
+      if (r.data.token) setSessionToken(r.data.token);
       setUser(r.data.email);
       setAuthMsg({ ok: true, text: `Bine ai venit, ${r.data.email}!` });
     } else {
@@ -56,6 +57,7 @@ export default function SettingsPanel({
 
   async function logout() {
     await apiAuth(tmpUrl, '/auth/logout', { method: 'POST' });
+    clearSessionToken();
     setUser(null);
     setUsers([]);
   }

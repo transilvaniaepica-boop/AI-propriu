@@ -2,15 +2,14 @@
 Agent Studio — backend cu autentificare simpla (multi-utilizator).
 
 Cheia API OpenRouter stă DOAR pe server. Fiecare utilizator are email + parolă;
-parolele se hash-uiesc cu PBKDF2 (stdlib), sesiunile sunt token-uri în SQLite,
-trimise browserului ca cookie httpOnly.
+parolele se hash-uiesc cu PBKDF2 (stdlib), sesiunile sunt token-uri în SQLite.
+Tokenul se trimite fie ca cookie httpOnly, fie ca header Authorization: Bearer.
 
 Variabile de mediu (.env):
   OPENROUTER_API_KEY  — cheia ta de pe openrouter.ai/keys (obligatoriu)
   ALLOWED_ORIGINS     — origini permise, SEPARAT PRIN VIRGULĂ, fara "*"
                         (cookie-urile nu merg cu wildcard). Ex:
                         https://nume.github.io,http://localhost:5173
-  COOKIE_SECURE       — "1" în producție (HTTPS), altfel lasă gol local
   DB_PATH             — fișierul SQLite (implicit users.db)
 
 Rulezi local:
@@ -29,7 +28,7 @@ import sqlite3
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Request, Response, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
@@ -97,8 +96,11 @@ def verify_password(password: str, stored: str) -> bool:
 
 # ---------- sesiune ----------
 
-def current_user(request: Request) -> str:
+def current_user(request: Request, authorization: str | None = Header(default=None)) -> str:
+    # tokenul vine fie din cookie, fie din header-ul Authorization: Bearer <token>
     token = request.cookies.get(COOKIE_NAME)
+    if not token and authorization and authorization.startswith("Bearer "):
+        token = authorization[7:].strip()
     if not token:
         raise HTTPException(status_code=401, detail="Neautentificat — conectează-te mai întâi")
     with db() as c:
@@ -109,6 +111,14 @@ def current_user(request: Request) -> str:
     if not row:
         raise HTTPException(status_code=401, detail="Sesiune invalidă")
     return row["email"]
+
+
+def new_session(user_id: int) -> str:
+    token = secrets.token_hex(32)
+    with db() as c:
+        c.execute("INSERT INTO sessions (token, user_id, created_at) VALUES (?, ?, ?)",
+                  (token, user_id, datetime.now(timezone.utc).isoformat()))
+    return token
 
 
 def set_session_cookie(resp: Response, token: str):
@@ -141,9 +151,12 @@ async def register(body: Creds, resp: Response):
             raise HTTPException(status_code=403, detail="Doar adminul poate crea conturi (vezi Setări → Utilizatori)")
         try:
             c.execute("INSERT INTO users (email, password_hash) VALUES (?, ?)", (email, hash_password(body.password)))
+            user_id = c.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()["id"]
         except sqlite3.IntegrityError:
             raise HTTPException(status_code=409, detail="Email deja înregistrat")
-    return {"ok": True, "email": email, "note": "Cont admin creat. Autentifică-te acum."}
+    token = new_session(user_id)
+    set_session_cookie(resp, token)
+    return {"ok": True, "email": email, "token": token, "note": "Cont admin creat."}
 
 
 @app.post("/auth/login")
@@ -153,11 +166,8 @@ async def login(body: Creds, resp: Response):
         row = c.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
     if not row or not verify_password(body.password, row["password_hash"]):
         raise HTTPException(status_code=401, detail="Email sau parolă greșită")
-    token = secrets.token_hex(32)
-    with db() as c:
-        c.execute("INSERT INTO sessions (token, user_id, created_at) VALUES (?, ?, ?)",
-                  (token, row["id"], datetime.now(timezone.utc).isoformat()))
-    out = JSONResponse({"ok": True, "email": email})
+    token = new_session(row["id"])
+    out = JSONResponse({"ok": True, "email": email, "token": token})
     set_session_cookie(out, token)
     return out
 
