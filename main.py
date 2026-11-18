@@ -228,11 +228,13 @@ async def models(request: Request):
 async def chat_completions(request: Request):
     current_user(request)
     body = await request.json()
-    headers = {
+        headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
         "Content-Type": "application/json",
+        "Accept-Encoding": "identity",
         "HTTP-Referer": str(request.headers.get("origin", "")),
         "X-Title": "Agent Studio",
+    }
     }
     async with httpx.AsyncClient(timeout=None) as client:
         if body.get("stream"):
